@@ -1,15 +1,10 @@
-use std::str::FromStr;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::Router;
 use axum::routing::post;
 use cargo_manifest::Manifest;
 use serde::Deserialize;
-
-#[derive(serde::Deserialize)]
-struct Toml {
-    package: Package,
-}
+use shuttle_runtime::__internals::serde_json;
 
 #[derive(Deserialize)]
 struct Package {
@@ -35,48 +30,50 @@ struct Order {
 }
 
 async fn toml_orders(headers: HeaderMap, text: String) -> impl IntoResponse {
-    if headers.get("content-type") != Some(&"application/toml".parse().unwrap()) {
-        return (StatusCode::UNSUPPORTED_MEDIA_TYPE, "Invalid content type".to_string());
-    }
 
-    match toml::from_str::<Toml>(&text) {
-        Ok(toml) => {
-            if !toml.package.keywords.contains(&"Christmas 2024".to_string()) {
-                return (StatusCode::BAD_REQUEST, "Magic keyword not provided".to_string());
+    let Some(package) = (match headers.get("content-type") {
+        Some(content_type) => {
+            match content_type.to_str() {
+                Ok("application/toml") => {
+                    toml::from_str::<Manifest<Metadata>>(&text).ok()
+                },
+                Ok("application/json") => {
+                    serde_json::from_str::<Manifest<Metadata>>(&text).ok()
+                },
+                Ok("application/yaml") => {
+                    serde_yaml::from_str::<Manifest<Metadata>>(&text).ok()
+                },
+                _ => return (StatusCode::UNSUPPORTED_MEDIA_TYPE, "Unsupported content type".to_string())
             }
-        }
-        Err(e) => {
-            (StatusCode::BAD_REQUEST, e.to_string());
-        }
-    }
-
-    if Manifest::from_str(&text).is_err() {
+        },
+        None => return (StatusCode::UNSUPPORTED_MEDIA_TYPE, "Content type not set".to_string()),
+    }).and_then(|manifest| manifest.package) else {
         return (StatusCode::BAD_REQUEST, "Invalid manifest".to_string());
+    };
+
+    if !package
+        .keywords
+        .and_then(|kws| kws.as_local())
+        .map(|kws| kws.contains(&"Christmas 2024".to_string()))
+        .unwrap_or_default() {
+        return (StatusCode::BAD_REQUEST, "Magic keyword not provided".to_string());
     }
 
+    let Some(orders) = package.metadata.map(|m| {
+        m.orders.into_iter()
+            .filter(|order| order.quantity.is_some())
+            .map(|order| {
+                format!("{}: {}", order.item, order.quantity.unwrap())
+            })
+            .collect::<Vec<_>>()
+        }) else {
+            return (StatusCode::NO_CONTENT, "No orders found".to_string());
+        };
 
-    match toml::from_str::<Toml>(&text) {
-        Ok(toml) => {
-            let result: String = toml.package.metadata.orders
-                .into_iter()
-                .filter_map(|order| {
-                    if let Some(quantity) = order.quantity {
-                       Some(format!("{}: {}", order.item, quantity))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            if result.is_empty() {
-                 return (StatusCode::NO_CONTENT, "No orders found".to_string());
-            }
-            (StatusCode::OK, result)
-        }
-        Err(e) => {
-            (StatusCode::BAD_REQUEST, e.to_string())
-        }
+    if orders.is_empty() {
+        return (StatusCode::NO_CONTENT, "No orders found".to_string());
     }
+    (StatusCode::OK, orders.join("\n"))
 }
 
 pub fn day5_routes(router: Router) -> Router {

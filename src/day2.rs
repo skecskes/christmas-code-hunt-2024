@@ -5,7 +5,6 @@ use axum::routing::get;
 use serde::Deserialize;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::ops::BitXor;
-use std::str::FromStr;
 
 #[derive(Deserialize)]
 struct FromKey {
