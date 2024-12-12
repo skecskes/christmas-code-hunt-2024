@@ -323,9 +323,9 @@ dependencies = [
 
 [[package]]
 name = "cch24-validator"
-version = "5.0.0"
+version = "12.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1921df4b4c0d457b846a3a7cc5c6e9fdbd6849a51ec97e046da8f077ba71b798"
+checksum = "a66485c13f7f3249c1264df286d814e7285fb36b6cc2db1d5202f148e504c7da"
 dependencies = [
  "chrono",
  "clap",
@@ -1063,6 +1063,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
+name = "leaky-bucket"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a396bb213c2d09ed6c5495fd082c991b6ab39c9daf4fff59e6727f85c73e4c5"
+dependencies = [
+ "parking_lot",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.167"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1452,7 +1463,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2079,7 +2090,9 @@ dependencies = [
  "axum 0.7.9",
  "cargo-manifest",
  "cch24-validator",
+ "leaky-bucket",
  "serde",
+ "serde_json",
  "serde_with",
  "serde_yaml",
  "shuttle-axum",
