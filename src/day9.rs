@@ -24,24 +24,6 @@ impl Milk {
     }
 }
 
-fn new_limiter() -> RateLimiter {
-    RateLimiter::builder()
-        .initial(5)
-        .max(5)
-        .refill(1)
-        .interval(Duration::from_secs(1))
-        .build()
-}
-
-pub fn day9_routes() -> Router {
-    let state = Milk::new();
-
-    Router::new()
-        .route("/9/milk", post(milk))
-        .route("/9/refill", post(refill))
-        .with_state(state)
-}
-
 #[skip_serializing_none]
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct MilkUnits {
@@ -53,7 +35,7 @@ struct MilkUnits {
     extra: HashMap<String, serde_json::Value>,
 }
 
-pub async fn milk(
+pub async fn post_milk(
     headers: HeaderMap,
     State(state): State<Milk>,
     body: String,
@@ -144,9 +126,27 @@ pub async fn milk(
     Ok((StatusCode::OK, "Milk withdrawn\n".to_string()))
 }
 
-pub async fn refill(State(state): State<Milk>) -> impl IntoResponse {
+pub async fn post_refill(State(state): State<Milk>) -> impl IntoResponse {
     let mut limiter = state.limiter.lock().unwrap();
     *limiter = new_limiter();
 
     StatusCode::OK
+}
+
+fn new_limiter() -> RateLimiter {
+    RateLimiter::builder()
+        .initial(5)
+        .max(5)
+        .refill(1)
+        .interval(Duration::from_secs(1))
+        .build()
+}
+
+pub fn day9_routes() -> Router {
+    let milk_state = Milk::new();
+
+    Router::new()
+        .route("/9/milk", post(post_milk))
+        .route("/9/refill", post(post_refill))
+        .with_state(milk_state)
 }
