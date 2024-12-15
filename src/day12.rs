@@ -1,4 +1,5 @@
 use std::cmp::PartialEq;
+use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -6,18 +7,32 @@ use axum::response::IntoResponse;
 use axum::Router;
 use axum::routing::{get, post};
 
+
+#[derive(Debug)]
+enum GameState {
+    Playing,
+    CookieWon,
+    MilkWon,
+    EndedNoWinner,
+}
+
+impl PartialEq for GameState {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (GameState::Playing, GameState::Playing) => true,
+            (GameState::CookieWon, GameState::CookieWon) => true,
+            (GameState::MilkWon, GameState::MilkWon) => true,
+            (GameState::EndedNoWinner, GameState::EndedNoWinner) => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Tile {
     Empty,
     Cookie,
     Milk,
-}
-
-enum Winner {
-    Cookie,
-    Milk,
-    NoWinner,
-    GameOn,
 }
 
 impl Tile {
@@ -56,12 +71,14 @@ impl Grid {
 #[derive(Clone)]
 pub struct Board {
     grid: Arc<Mutex<Grid>>,
+    state: Arc<Mutex<GameState>>,
 }
 
 impl Board {
     fn new() -> Self {
         Self {
             grid: Arc::new(Mutex::new(Grid::new())),
+            state: Arc::new(Mutex::new(GameState::Playing)),
         }
     }
 
@@ -78,34 +95,34 @@ impl Board {
         }
         result.push_str("⬜⬜⬜⬜⬜⬜\n");
 
-        match detect_winner(&grid.tiles) {
-            Winner::Cookie => result.push_str("🍪 wins!\n"),
-            Winner::Milk => result.push_str("🥛 wins!\n"),
-            Winner::NoWinner => result.push_str("No winner!\n"),
-            Winner::GameOn => {},
+        match self.state.lock().unwrap().deref() {
+            GameState::CookieWon => result.push_str("🍪 wins!\n"),
+            GameState::MilkWon => result.push_str("🥛 wins!\n"),
+            GameState::EndedNoWinner => result.push_str("No winner!\n"),
+            GameState::Playing => {},
         };
 
         result
     }
 }
 
-fn detect_winner(grid: &[[Tile; 4]; 4]) -> Winner {
+fn get_game_state(grid: &[[Tile; 4]; 4]) -> GameState {
     // check diagonals
     if grid[0][0] == grid[1][1] && grid[1][1] == grid[2][2] && grid[2][2] == grid[3][3] && grid[0][0] != Tile::Empty {
-         if grid[0][0] == Tile::Cookie {
-            Winner::Cookie
+         return if grid[0][0] == Tile::Cookie {
+             GameState::CookieWon
          } else {
-            Winner::Milk
+             GameState::MilkWon
          };
     };
 
     // check rows
     for row in grid.iter() {
         if row[0] == row[1] && row[1] == row[2] && row[2] == row[3] && row[0] != Tile::Empty {
-            if row[0] == Tile::Cookie {
-                Winner::Cookie
+            return if row[0] == Tile::Cookie {
+                GameState::CookieWon
             } else {
-                Winner::Milk
+                GameState::MilkWon
             };
         };
     };
@@ -113,19 +130,19 @@ fn detect_winner(grid: &[[Tile; 4]; 4]) -> Winner {
     // check columns
     for i in 0..4 {
         if grid[0][i] == grid[1][i] && grid[1][i] == grid[2][i] && grid[2][i] == grid[3][i] && grid[0][i] != Tile::Empty {
-            if grid[0][i] == Tile::Cookie {
-                Winner::Cookie
+            return if grid[0][i] == Tile::Cookie {
+                GameState::CookieWon
             } else {
-                Winner::Milk
+                GameState::MilkWon
             };
         };
     };
 
     // check if the board is full
-    if grid.iter().all(|row| row.iter().all(|&tile| tile != Tile::Empty)) {
-        Winner::NoWinner
+    return if grid.iter().all(|row| row.iter().all(|&tile| tile != Tile::Empty)) {
+        GameState::EndedNoWinner
     } else {
-        Winner::GameOn
+        GameState::Playing
     }
 }
 
@@ -137,6 +154,8 @@ pub async fn reset_board(State(board): State<Arc<Board>>) -> impl IntoResponse {
     {
         let mut grid = board.grid.lock().unwrap();
         *grid = Grid::new();
+        let mut state = board.state.lock().unwrap();
+        *state = GameState::Playing;
     }
     (StatusCode::OK, board.to_string())
 }
@@ -145,27 +164,43 @@ pub async fn place_item(
     State(board): State<Arc<Board>>,
     Path((team, column)): Path<(String, usize)>, // team: "cookie" or "milk", column: from 1 to 4
 ) -> impl IntoResponse {
-    let tile = match team.as_str() {
+
+    if *board.state.lock().unwrap().deref() != GameState::Playing {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Game is over".to_string());
+    }
+
+    let tile_to_add = match team.as_str() {
         "cookie" => Tile::Cookie,
         "milk" => Tile::Milk,
         _ => return (StatusCode::BAD_REQUEST, "Invalid team".to_string()),
     };
 
-    let tile_index = column - 1;
-    if tile_index > 3 {
+    let column_index = column - 1;
+    if column_index > 3 {
         return (StatusCode::BAD_REQUEST, "Invalid column".to_string());
     }
     {
-        let mut grid = board.grid.lock().unwrap();
-        for row in grid.tiles.iter_mut().rev() {
-            if row[tile_index] == Tile::Empty {
-                row[tile_index] = tile;
-                return (StatusCode::OK, board.to_string());
+        let mut item_was_placed = false;
+        {
+            let mut grid = board.grid.lock().unwrap();
+
+            for row in grid.tiles.iter_mut().rev() {
+                if row[column_index] == Tile::Empty {
+                    row[column_index] = tile_to_add;
+                    item_was_placed = true;
+                    let mut state = board.state.lock().unwrap();
+                    *state = get_game_state(&grid.tiles);
+                    // println!("{:?}", state.deref());
+                    break;
+                }
             }
+        }
+        if item_was_placed {
+            return (StatusCode::OK, board.to_string());
         }
     }
 
-    (StatusCode::BAD_REQUEST, "Column is full".to_string())
+    (StatusCode::SERVICE_UNAVAILABLE, "Column is full".to_string())
 }
 
 
