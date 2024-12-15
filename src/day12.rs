@@ -98,7 +98,7 @@ impl Board {
         match self.state.lock().unwrap().deref() {
             GameState::CookieWon => result.push_str("🍪 wins!\n"),
             GameState::MilkWon => result.push_str("🥛 wins!\n"),
-            GameState::EndedNoWinner => result.push_str("No winner!\n"),
+            GameState::EndedNoWinner => result.push_str("No winner.\n"),
             GameState::Playing => {},
         };
 
@@ -114,6 +114,13 @@ fn get_game_state(grid: &[[Tile; 4]; 4]) -> GameState {
          } else {
              GameState::MilkWon
          };
+    };
+    if grid[0][3] == grid[1][2] && grid[1][2] == grid[2][1] && grid[2][1] == grid[3][0] && grid[0][3] != Tile::Empty {
+        return if grid[0][3] == Tile::Cookie {
+            GameState::CookieWon
+        } else {
+            GameState::MilkWon
+        };
     };
 
     // check rows
