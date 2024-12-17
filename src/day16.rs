@@ -1,10 +1,13 @@
 use std::time::{SystemTime, UNIX_EPOCH};
+use axum::body::{to_bytes, Body};
 use axum::response::IntoResponse;
-use axum::Router;
+use axum::{Router};
 use axum::extract::Json;
 use axum::http::{StatusCode};
 use axum::routing::{get, post};
 use axum_extra::extract::cookie::CookieJar;
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+use jsonwebtoken::errors::{ErrorKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -76,11 +79,73 @@ pub async fn unwrap(
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct OldClaims {
+    reindeerSnack: String,
+    santaHatColor: String,
+    snowGlobeCollection: u32,
+    stockingStuffers: Vec<String>,
+    treeHeight: u32,
+}
 
+pub async fn decode_jwt(
+    body: Body
+) -> impl IntoResponse {
+    // Implement a POST endpoint /16/decode that takes a JWT (string) as the request body:
+    let data = to_bytes(body, usize::MAX).await.unwrap();
+    let token = String::from_utf8(data.to_vec()).unwrap();
+    let decoding_key = match DecodingKey::from_rsa_pem(include_bytes!("day16_santa_public_key.pem")) {
+        Ok(key) => key,
+        Err(err) => {
+            println!("{:?}", err);
+            return axum::http::Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body("Invalid public key".to_string())
+                .unwrap()
+        }
+    };
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.required_spec_claims.remove("exp");
+
+    match decode::<OldClaims>(
+        &token,
+        &decoding_key,
+        &validation
+    ) {
+        Ok(decoded) => {
+            axum::http::Response::builder()
+                .body(serde_json::to_string(&decoded.claims).unwrap())
+                .unwrap()
+        },
+        Err(err) => match *err.kind() {
+            ErrorKind::InvalidToken => {
+                axum::http::Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body("Invalid token".to_string())
+                    .unwrap()
+            },
+            ErrorKind::InvalidSignature => {
+                axum::http::Response::builder()
+                    .status(StatusCode::UNAUTHORIZED)
+                    .body("Invalid signature".to_string())
+                    .unwrap()
+            },
+            _ => {
+                println!("{:?}", err);
+                println!("{}", err.to_string());
+                axum::http::Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body("Invalid token: other reason".to_string())
+                    .unwrap()
+            }
+        }
+    }
+}
 
 pub fn day16_routes() -> Router {
 
     Router::new()
         .route("/16/wrap", post(wrap))
         .route("/16/unwrap", get(unwrap))
+        .route("/16/decode", post(decode_jwt))
 }
