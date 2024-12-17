@@ -3,6 +3,7 @@ mod day2;
 mod day5;
 mod day9;
 mod day12;
+mod day16;
 
 use axum::{Router};
 use crate::day0::day0_routes;
@@ -19,6 +20,7 @@ async fn main() -> shuttle_axum::ShuttleAxum {
     let router = day5_routes(router);
     let router = router
         .merge(day9_routes())
-        .merge(day12_routes());
+        .merge(day12_routes())
+        .merge(day16::day16_routes());
     Ok(router.into())
 }
